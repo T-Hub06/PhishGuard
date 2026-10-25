@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Environment and secrets
+.env
+.streamlit/secrets.toml
+
+# Training data (large, re-downloadable; PhishTank/Tranco change daily)
+data/
+
+# Local scan history database
+database/
+
+# Model file: tracked by default so the app runs without retraining.
+# Uncomment the next line to keep it out of the repo instead.
+# model/*.pkl
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
