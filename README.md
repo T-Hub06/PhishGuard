@@ -51,7 +51,6 @@ Tranco lists only domains, so the model is trained on bare hostnames (with `www.
 ├── train_model.py    # Trains and saves the Random Forest
 ├── requirements.txt
 ├── LICENSE
-└── PROJECT_REPORT.md # Original project proposal
 ```
 
 ## Getting started
@@ -88,10 +87,6 @@ Python · Streamlit · scikit-learn · SHAP · pandas · Plotly · OpenCV · pyt
 - **"Safe" is not a guarantee.** An old or newly registered but harmless-looking domain can still be malicious.
 - **Fixed brand list** for typosquatting, and heuristic scoring weights.
 - PhishTank and Tranco change daily, so exact numbers will differ between downloads.
-
-## Author
-
-**Tushar Joshi**, BCA (AI & Data Science), Graphic Era (Deemed to be University), Dehradun
 
 ## License
 
