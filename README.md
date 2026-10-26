@@ -18,7 +18,7 @@ Most student phishing detectors only look at the text of a URL. PhishGuard also 
 - **Explains itself on two levels:**
   - SHAP values show which features pushed the ML model toward "phishing" or "safe" for each scan
   - An evidence list shows every forensic finding that moved the score
-- **Keeps an audit log** of scans in SQLite, with an analytics tab and CSV export.
+- **Keeps an audit log** of scans in SQLite, with an analytics tab, CSV export, and the option to delete selected records or clear the whole history.
 
 | Score | Verdict |
 |-------|---------|

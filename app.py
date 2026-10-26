@@ -8,16 +8,24 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
 try:
     import shap
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
+
 from features import extract_features, FEATURE_NAMES
 from forensics import decode_qr_image
 from risk_engine import evaluate_url
 
-st.set_page_config(page_title="PhishGuard — Threat Intelligence",page_icon="🛡️",layout="wide",initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="PhishGuard — Threat Intelligence",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 DB_PATH = "database/scans.db"
 MODEL_PATH = "model/phishing_model.pkl"
 SAMPLE_QR_PATH = "sample_quish.png"
@@ -60,6 +68,27 @@ def save_scan(url, label, confidence, risk_score, tier, input_type="url"):
     conn.commit()
     conn.close()
 
+def delete_scans(ids):
+    """Delete specific scan records by id. Returns the number removed."""
+    ids = [int(i) for i in ids]
+    if not ids:
+        return 0
+    conn = sqlite3.connect(DB_PATH)
+    conn.executemany("DELETE FROM scans WHERE id = ?", [(i,) for i in ids])
+    removed = conn.total_changes
+    conn.commit()
+    conn.close()
+    return removed
+
+def clear_all_scans():
+    """Delete the entire scan history. Returns the number removed."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.execute("DELETE FROM scans")
+    removed = cur.rowcount
+    conn.commit()
+    conn.close()
+    return removed
+
 def load_scans():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT id, url, label, risk_score, tier, input_type, scanned_at FROM scans ORDER BY id DESC", conn)
@@ -69,7 +98,7 @@ def load_scans():
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
-        st.error("Model file not found. Please run `python train_model.py` first")
+        st.error("Model file not found. Please run `python train_model.py` first.")
         st.stop()
     return joblib.load(MODEL_PATH)
 
@@ -80,6 +109,8 @@ def load_explainer(_model):
     return shap.TreeExplainer(_model)
 
 def shap_for_phishing(explainer, X):
+    """Per-feature SHAP values for the phishing class (class 1) of one row.
+    Handles both old (list) and new (3D array) shap return formats."""
     sv = explainer.shap_values(X)
     if isinstance(sv, list):
         vals = np.asarray(sv[1])[0]
@@ -89,15 +120,21 @@ def shap_for_phishing(explainer, X):
     return vals
 
 def to_host(url):
+    """Reduce a URL to its bare hostname. The model is trained on hostnames
+    only (see train_model.py), so inference must use the same input."""
     u = url.strip()
     if not u.startswith(("http://", "https://")):
         u = "http://" + u
     host = (urlparse(u).hostname or "").lower()
     return host[4:] if host.startswith("www.") else host
 
+
 init_db()
+if "ledger_version" not in st.session_state:
+    st.session_state.ledger_version = 0  
 model = load_model()
 explainer = load_explainer(model)
+
 st.title("🛡️ PhishGuard: Hybrid Threat Intelligence Platform")
 st.caption("Random Forest (18 Feats) • Live WHOIS (Port 43) • DNS MX • Levenshtein Distance • OpenCV QR Engine")
 st.divider()
@@ -107,6 +144,7 @@ tabs = st.tabs([
     "📷 Quishing",
     "📊 Analytics"
 ])
+
 def render_analysis_results(target_url, input_source="url"):
     with st.spinner("Analyzing target across AI and Live Network Forensics..."):
         features = extract_features(to_host(target_url))
@@ -115,7 +153,14 @@ def render_analysis_results(target_url, input_source="url"):
         ml_phish_prob = float(proba[1])
         res = evaluate_url(target_url, ml_phish_prob)
 
-    save_scan( url=target_url,label=res['verdict'],confidence=res['risk_score'],risk_score=res['risk_score'],tier=res['tier'],input_type=input_source)
+    save_scan(
+        url=target_url,
+        label=res['verdict'],
+        confidence=res['risk_score'],
+        risk_score=res['risk_score'],
+        tier=res['tier'],
+        input_type=input_source
+    )
 
     st.write("")
     left_col, right_col = st.columns([1, 1], gap="large")
@@ -123,17 +168,21 @@ def render_analysis_results(target_url, input_source="url"):
     with left_col:
         st.markdown("### AI & Assessment")
         score = int(res['risk_score'])
+
         if res['tier'] == 'safe':
             st.success(f"#### {res['icon']} {res['verdict']}")
         elif res['tier'] == 'caution':
             st.warning(f"#### {res['icon']} {res['verdict']}")
         else:
             st.error(f"#### {res['icon']} {res['verdict']}")
+
         st.progress(score / 100)
         st.markdown(f"**Composite Risk Score:** `{score} / 100` &nbsp;|&nbsp; **ML Malicious Probability:** `{res['ml_probability']}%`")
         st.write(res['summary'])
+
         if res['redirects'].get('is_redirected'):
             st.info(f"🔀 **Redirect Chain Unrolled:** `{res['final_url']}` ({res['redirects']['redirect_count']} hops)")
+
         st.write("")
 
         st.markdown("##### Why the ML model said this (SHAP)")
@@ -143,7 +192,11 @@ def render_analysis_results(target_url, input_source="url"):
             st.caption("Red bars push this hostname toward phishing, green bars toward safe.")
             try:
                 vals = shap_for_phishing(explainer, X)
-                shap_df = pd.DataFrame({"Feature": FEATURE_NAMES,"Value": [features[f] for f in FEATURE_NAMES],"SHAP": vals})
+                shap_df = pd.DataFrame({
+                    "Feature": FEATURE_NAMES,
+                    "Value": [features[f] for f in FEATURE_NAMES],
+                    "SHAP": vals
+                })
                 shap_df = shap_df[shap_df["SHAP"].abs() > 1e-6]
                 shap_df = shap_df.reindex(
                     shap_df["SHAP"].abs().sort_values(ascending=False).index
@@ -152,15 +205,27 @@ def render_analysis_results(target_url, input_source="url"):
                 shap_df["Direction"] = np.where(
                     shap_df["SHAP"] > 0, "Toward phishing", "Toward safe")
 
-                fig_shap = px.bar(shap_df, x="SHAP", y="Label", orientation="h",color="Direction",color_discrete_map={"Toward phishing": "#e74c3c","Toward safe": "#2ecc71"},height=300)
-                fig_shap.update_layout(margin=dict(l=10, r=10, t=10, b=10),legend_title_text="",xaxis_title="Impact on phishing probability",yaxis_title="")
+                fig_shap = px.bar(
+                    shap_df, x="SHAP", y="Label", orientation="h",
+                    color="Direction",
+                    color_discrete_map={
+                        "Toward phishing": "#e74c3c",
+                        "Toward safe": "#2ecc71"
+                    },
+                    height=300
+                )
+                fig_shap.update_layout(
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    legend_title_text="",
+                    xaxis_title="Impact on phishing probability",
+                    yaxis_title=""
+                )
                 st.plotly_chart(fig_shap, use_container_width=True)
             except Exception as e:
                 st.warning(f"SHAP explanation unavailable: {str(e)[:80]}")
 
     with right_col:
         st.markdown("### Live Forensics")
-
         t1, t2 = st.columns(2)
         with t1:
             age_days = res['whois'].get('age_days')
@@ -170,6 +235,7 @@ def render_analysis_results(target_url, input_source="url"):
             else:
                 st.metric("Domain Age", "Unverified", delta_color="inverse")
                 st.caption("Private WHOIS registry")
+
         with t2:
             has_ssl = res['ssl'].get('has_ssl', False)
             if has_ssl:
@@ -188,6 +254,7 @@ def render_analysis_results(target_url, input_source="url"):
             else:
                 st.metric("Business Mail (MX)", "None", "No Mail Server", delta_color="inverse")
                 st.caption("Common on throwaway domains")
+
         with t4:
             is_typo = res['typosquatting'].get('is_typosquat', False)
             brand_target = res['typosquatting'].get('targeted_brand')
@@ -203,6 +270,7 @@ def render_analysis_results(target_url, input_source="url"):
                 st.caption("Standard Latin character set")
 
         st.divider()
+
         st.markdown("##### Explainable Evidence List")
         has_flags = False
         if res['dangers']:
@@ -219,6 +287,7 @@ def render_analysis_results(target_url, input_source="url"):
 
         if not has_flags:
             st.info("No suspicious structural, network, or visual deception anomalies identified.")
+
         with st.expander("Raw Registry JSON Viewer"):
             st.json({
                 "analyzed_url": target_url,
@@ -309,11 +378,17 @@ with tabs[1]:
 
 with tabs[2]:
     st.markdown("#### Security Analytics & Audit Ledger")
+
+    flash = st.session_state.pop("ledger_flash", None)
+    if flash:
+        st.success(flash)
+
     history_df = load_scans()
 
     if history_df.empty:
         st.info("No audit logs recorded yet. Run an analysis in Tab 1 or Tab 2.")
     else:
+        # Summary KPI Cards
         total_count = len(history_df)
         phish_count = len(history_df[history_df['tier'] == 'phishing']) if 'tier' in history_df.columns else 0
         caution_count = len(history_df[history_df['tier'] == 'caution']) if 'tier' in history_df.columns else 0
@@ -330,7 +405,18 @@ with tabs[2]:
         c_chart1, c_chart2 = st.columns(2)
         with c_chart1:
             if 'tier' in history_df.columns:
-                fig_pie = px.pie(history_df,names='tier',title="Threat Tier Breakdown",color='tier',color_discrete_map={"safe": "#2ecc71","caution": "#f39c12","phishing": "#e74c3c"},hole=0.4)
+                fig_pie = px.pie(
+                    history_df,
+                    names='tier',
+                    title="Threat Tier Breakdown",
+                    color='tier',
+                    color_discrete_map={
+                        "safe": "#2ecc71",
+                        "caution": "#f39c12",
+                        "phishing": "#e74c3c"
+                    },
+                    hole=0.4
+                )
                 fig_pie.update_layout(height=280, margin=dict(l=10, r=10, t=30, b=10))
                 st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -338,11 +424,65 @@ with tabs[2]:
             if 'scanned_at' in history_df.columns:
                 history_df['date'] = pd.to_datetime(history_df['scanned_at'], format='mixed', errors='coerce').dt.date
                 trend = history_df.dropna(subset=['date']).groupby(['date', 'label']).size().reset_index(name='scans')
-                fig_bar = px.bar(trend,x='date',y='scans',color='label',title="Telemetry Activity Timeline",barmode='stack',height=280)
+                fig_bar = px.bar(
+                    trend,
+                    x='date',
+                    y='scans',
+                    color='label',
+                    title="Telemetry Activity Timeline",
+                    barmode='stack',
+                    height=280
+                )
                 fig_bar.update_layout(margin=dict(l=10, r=10, t=30, b=10))
                 st.plotly_chart(fig_bar, use_container_width=True)
 
         st.markdown("##### Historical Audit Ledger")
-        st.dataframe(history_df, use_container_width=True, hide_index=True)
+        st.caption("Tick **Delete?** on any rows you want to remove, then press the button below the table.")
+
+        ledger_cols = ['id', 'url', 'label', 'risk_score', 'tier', 'input_type', 'scanned_at']
+        ledger_df = history_df[ledger_cols].copy()
+        ledger_df.insert(0, 'Delete?', False)
+
+        edited_df = st.data_editor(
+            ledger_df,
+            use_container_width=True,
+            hide_index=True,
+            disabled=ledger_cols,
+            column_config={
+                "Delete?": st.column_config.CheckboxColumn("Delete?", default=False),
+            },
+            key=f"ledger_editor_{st.session_state.ledger_version}"
+        )
+        selected_ids = edited_df.loc[edited_df['Delete?'], 'id'].tolist()
+
+        d1, d2 = st.columns([1, 2])
+        with d1:
+            if st.button(
+                f"🗑️ Delete selected ({len(selected_ids)})",
+                disabled=len(selected_ids) == 0,
+                use_container_width=True
+            ):
+                removed = delete_scans(selected_ids)
+                st.session_state.ledger_version += 1
+                st.session_state.ledger_flash = f"Deleted {removed} scan record(s)."
+                st.rerun()
+
+        with d2:
+            with st.expander("Clear entire history"):
+                confirm_all = st.checkbox(
+                    "I understand this permanently deletes every saved scan.",
+                    key=f"confirm_clear_{st.session_state.ledger_version}"
+                )
+                if st.button("⚠️ Delete all history", disabled=not confirm_all):
+                    removed = clear_all_scans()
+                    st.session_state.ledger_version += 1
+                    st.session_state.ledger_flash = f"Cleared all history ({removed} records)."
+                    st.rerun()
+
         csv = history_df.to_csv(index=False).encode('utf-8')
-        st.download_button(label="📥 Export Security Ledger (CSV)",data=csv,file_name="phishguard_audit_telemetry.csv",mime="text/csv")
+        st.download_button(
+            label="📥 Export Security Ledger (CSV)",
+            data=csv,
+            file_name="phishguard_audit_telemetry.csv",
+            mime="text/csv"
+        )
