@@ -87,6 +87,8 @@ Python · Streamlit · scikit-learn · SHAP · pandas · Plotly · OpenCV · pyt
 - **"Safe" is not a guarantee.** An old or newly registered but harmless-looking domain can still be malicious.
 - **Fixed brand list** for typosquatting, and heuristic scoring weights.
 - PhishTank and Tranco change daily, so exact numbers will differ between downloads.
+## Live Link
+https://phishguard-4fsjnu4baeamfbejhm2tw7.streamlit.app/
 
 ## License
 
