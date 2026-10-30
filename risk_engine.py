@@ -1,4 +1,5 @@
 from urllib.parse import urlparse
+from features import _is_shortener
 from forensics import (
     get_domain_age,
     check_dns_mx,
@@ -78,6 +79,19 @@ def evaluate_url(url, ml_phish_prob=0.5):
         score += 10.0
         cautions.append(f"⚠️ Multiple redirect hops detected ({redirect_info.get('redirect_count')} hops)")
 
+    is_shortened = _is_shortener(hostname.lower())
+    if is_shortened:
+        score += 20.0
+        cautions.append(f"⚠️ URL shortener detected ({hostname}) - the real destination is hidden behind the short link")
+        if redirect_info.get('error') or not redirect_info.get('is_redirected'):
+            score += 10.0
+            cautions.append("⚠️ Shortened link could not be resolved to a destination")
+        else:
+            cautions.append(f"🔗 Resolved destination: {final_url}")
+
+    if is_shortened:
+        score = max(score, 31.0)
+
     risk_score = round(max(0.0, min(100.0, score)), 1)
 
     if risk_score <= 30.0:
@@ -123,5 +137,6 @@ def evaluate_url(url, ml_phish_prob=0.5):
         'ssl': ssl_info,
         'typosquatting': typo_info,
         'homoglyphs': homo_info,
-        'redirects': redirect_info
+        'redirects': redirect_info,
+        'is_shortened': is_shortened
     }

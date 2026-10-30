@@ -1,18 +1,67 @@
 import ipaddress
 import math
+import os
+import time
+import urllib.request
 from collections import Counter
 from urllib.parse import urlparse
+
 SUSPICIOUS_KEYWORDS = [
     'login', 'verify', 'account', 'update', 'secure', 'bank', 'pay',
     'confirm', 'signin', 'password', 'wallet', 'alert', 'urgent',
     'suspend', 'kyc', 'netbanking', 'billing', 'support', 'token',
     'claim', 'reward', 'security', 'unlock', 'portal', 'auth'
 ]
-SHORTENERS = [
+
+_SHORTENER_FALLBACK = [
     'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly',
     'is.gd', 'buff.ly', 'rebrand.ly', 'cutt.ly', 'shorte.st',
-    'v.gd', 'clck.ru', 'rb.gy'
+    'v.gd', 'clck.ru', 'rb.gy', 's.gy', 'short.io',
+    'shorturl.at', 'tiny.cc', 't.ly', 'qr.io', 'zws.im',
+    'bl.ink', 'hyperurl.co', 'urlzs.com'
 ]
+
+_SHORTENER_LIST_URL = (
+    "https://raw.githubusercontent.com/"
+    "PeterDaveHello/url-shorteners/master/list"
+)
+
+_CACHE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data", "shorteners_cache.txt"
+)
+_CACHE_TTL = 86400
+
+def _load_shorteners():
+    if os.path.exists(_CACHE_PATH):
+        age = time.time() - os.path.getmtime(_CACHE_PATH)
+        if age < _CACHE_TTL:
+            with open(_CACHE_PATH, encoding='utf-8') as f:
+                domains = [
+                    l.strip().lower() for l in f
+                    if l.strip() and not l.startswith('#')
+                ]
+            if domains:
+                return sorted(set(domains) | set(_SHORTENER_FALLBACK))
+    try:
+        with urllib.request.urlopen(_SHORTENER_LIST_URL, timeout=5) as r:
+            content = r.read().decode('utf-8')
+        os.makedirs(os.path.dirname(_CACHE_PATH), exist_ok=True)
+        with open(_CACHE_PATH, 'w', encoding='utf-8') as f:
+            f.write(content)
+        domains = [
+            l.strip().lower() for l in content.splitlines()
+            if l.strip() and not l.startswith('#')
+        ]
+        return sorted(set(domains) | set(_SHORTENER_FALLBACK))
+    except Exception:
+        return _SHORTENER_FALLBACK
+
+SHORTENERS = _load_shorteners()
+_SHORTENER_SET = frozenset(SHORTENERS)
+
+def _is_shortener(hostname):
+    parts = hostname.split('.')
+    return any('.'.join(parts[i:]) in _SHORTENER_SET for i in range(len(parts) - 1))
 
 SUSPICIOUS_TLDS = [
     '.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top',
@@ -69,7 +118,7 @@ def extract_features(url):
         'uses_https': 1 if parsed.scheme == 'https' else 0,
         'num_subdomains': max(0, hostname.count('.') - 1),
         'has_suspicious_keyword': 1 if any(k in lower_url for k in SUSPICIOUS_KEYWORDS) else 0,
-        'has_shortener': 1 if any(s in lower_host for s in SHORTENERS) else 0,
+        'has_shortener': 1 if _is_shortener(lower_host) else 0,
         'suspicious_tld': 1 if any(lower_host.endswith(t) for t in SUSPICIOUS_TLDS) else 0,
         'path_depth': len([p for p in path.split('/') if p]),
         'query_length': len(query),
